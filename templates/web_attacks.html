@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Web Attack Monitor</h1>
+
+<div class="card">
+    <p style="color:#94a3b8;">
+        This module logs web requests and detects suspicious patterns such as SQL injection,
+        XSS, directory traversal, scanner user-agents, sensitive path access, and unusual HTTP methods.
+    </p>
+
+    <a href="/export/web-attacks.csv" style="color:#93c5fd; font-weight:bold;">
+        Export Web Attack CSV
+    </a>
+</div>
+
+<div class="card">
+    <h2>Recent Web Requests</h2>
+
+    {% if requests|length == 0 %}
+        <p style="color:#94a3b8;">No web request events found yet.</p>
+    {% else %}
+        <table>
+            <tr>
+                <th>Time</th>
+                <th>IP</th>
+                <th>Method</th>
+                <th>Path</th>
+                <th>Query</th>
+                <th>User-Agent</th>
+                <th>Attack Type</th>
+                <th>Severity</th>
+                <th>Risk</th>
+                <th>Reason</th>
+            </tr>
+
+            {% for req in requests %}
+            <tr>
+                <td>{{ req.timestamp }}</td>
+                <td>{{ req.ip_address }}</td>
+                <td>{{ req.method }}</td>
+                <td>{{ req.path }}</td>
+                <td>{{ req.query_string }}</td>
+                <td style="max-width:220px; word-break:break-word;">{{ req.user_agent }}</td>
+                <td>{{ req.attack_type }}</td>
+                <td>
+                    {% if req.severity == "High" %}
+                        <span class="badge badge-high">High</span>
+                    {% elif req.severity == "Medium" %}
+                        <span class="badge badge-medium">Medium</span>
+                    {% else %}
+                        <span class="badge badge-low">Low</span>
+                    {% endif %}
+                </td>
+                <td>{{ req.risk_score }}</td>
+                <td>{{ req.reason }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</div>
+
+{% endblock %}
