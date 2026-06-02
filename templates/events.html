@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Login Events</h1>
+
+<div class="card">
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Time</th>
+            <th>Username</th>
+            <th>IP</th>
+            <th>City</th>
+            <th>Country</th>
+            <th>ISP</th>
+            <th>Proxy</th>
+            <th>VPN</th>
+            <th>Browser</th>
+            <th>OS</th>
+            <th>Device</th>
+            <th>Fingerprint</th>
+            <th>Status</th>
+            <th>Risk</th>
+        </tr>
+
+        {% for event in events %}
+        <tr>
+            <td>{{ event.id }}</td>
+            <td>{{ event.timestamp }}</td>
+            <td>{{ event.username }}</td>
+            <td>{{ event.ip_address }}</td>
+            <td>{{ event.city }}</td>
+            <td>{{ event.country }}</td>
+            <td>{{ event.isp }}</td>
+            <td>{{ event.is_proxy }}</td>
+            <td>{{ event.is_vpn }}</td>
+            <td>{{ event.browser }}</td>
+            <td>{{ event.os }}</td>
+            <td>{{ event.device }}</td>
+            <td>{{ event.fingerprint }}</td>
+            <td>{{ event.status }}</td>
+            <td>{{ event.risk_score }} - {{ event.risk_level }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+{% endblock %}

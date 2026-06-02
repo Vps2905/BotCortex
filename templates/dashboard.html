@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>SOC Overview</h1>
+
+<div class="grid">
+    <div class="card">
+        <div>Total Events</div>
+        <div class="stat">{{ total_events }}</div>
+    </div>
+
+    <div class="card">
+        <div>Successful Logins</div>
+        <div class="stat low">{{ success_count }}</div>
+    </div>
+
+    <div class="card">
+        <div>Failed Logins</div>
+        <div class="stat medium">{{ failed_count }}</div>
+    </div>
+
+    <div class="card">
+        <div>High Risk Events</div>
+        <div class="stat high">{{ high_risk_count }}</div>
+    </div>
+
+    <div class="card">
+        <div>Total Alerts</div>
+        <div class="stat high">{{ alert_count }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>IP Intelligence Map</h2>
+
+    <div id="map" style="height: 400px; border-radius: 10px;"></div>
+
+    {% if map_events|length == 0 %}
+        <p style="color:#94a3b8;">
+            No public IP geo-location data yet. Localhost/private IP events are stored but not shown on the map.
+        </p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Recent Login Events</h2>
+    <table>
+        <tr>
+            <th>Time</th>
+            <th>Username</th>
+            <th>IP</th>
+            <th>Location</th>
+            <th>ISP</th>
+            <th>Browser</th>
+            <th>OS</th>
+            <th>Device</th>
+            <th>Proxy/VPN</th>
+            <th>Status</th>
+            <th>Risk</th>
+        </tr>
+
+        {% for event in recent_events %}
+        <tr>
+            <td>{{ event.timestamp }}</td>
+            <td>{{ event.username }}</td>
+            <td>{{ event.ip_address }}</td>
+            <td>{{ event.city }}, {{ event.country }}</td>
+            <td>{{ event.isp }}</td>
+            <td>{{ event.browser }}</td>
+            <td>{{ event.os }}</td>
+            <td>{{ event.device }}</td>
+            <td>
+                {% if event.is_proxy or event.is_vpn %}
+                    <span class="badge badge-high">Yes</span>
+                {% else %}
+                    <span class="badge badge-low">No</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if event.status == "success" %}
+                    <span class="badge badge-success">success</span>
+                {% else %}
+                    <span class="badge badge-failed">failed</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if event.risk_level == "High" %}
+                    <span class="badge badge-high">{{ event.risk_score }} High</span>
+                {% elif event.risk_level == "Medium" %}
+                    <span class="badge badge-medium">{{ event.risk_score }} Medium</span>
+                {% else %}
+                    <span class="badge badge-low">{{ event.risk_score }} Low</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<div class="card">
+    <h2>Recent Alerts</h2>
+    <table>
+        <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Severity</th>
+            <th>IP</th>
+            <th>Message</th>
+        </tr>
+
+        {% for alert in recent_alerts %}
+        <tr>
+            <td>{{ alert.timestamp }}</td>
+            <td>{{ alert.alert_type }}</td>
+            <td>{{ alert.severity }}</td>
+            <td>{{ alert.ip_address }}</td>
+            <td>{{ alert.message }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    var map = L.map('map').setView([20.5937, 78.9629], 4);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    var mapEvents = [
+        {% for event in map_events %}
+        {
+            ip: "{{ event.ip_address }}",
+            username: "{{ event.username }}",
+            city: "{{ event.city }}",
+            country: "{{ event.country }}",
+            isp: "{{ event.isp }}",
+            lat: {{ event.latitude }},
+            lon: {{ event.longitude }},
+            status: "{{ event.status }}",
+            risk: "{{ event.risk_score }} {{ event.risk_level }}"
+        },
+        {% endfor %}
+    ];
+
+    mapEvents.forEach(function(event) {
+        var marker = L.marker([event.lat, event.lon]).addTo(map);
+
+        marker.bindPopup(
+            "<b>IP:</b> " + event.ip + "<br>" +
+            "<b>User:</b> " + event.username + "<br>" +
+            "<b>Location:</b> " + event.city + ", " + event.country + "<br>" +
+            "<b>ISP:</b> " + event.isp + "<br>" +
+            "<b>Status:</b> " + event.status + "<br>" +
+            "<b>Risk:</b> " + event.risk
+        );
+    });
+</script>
+
+{% endblock %}

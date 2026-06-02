@@ -1,118 +1,257 @@
-from flask import Flask, request, render_template_string
-import requests
+from flask import Flask, render_template, request, redirect, url_for, session, Response
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+import csv
+import io
+
+from modules.fingerprint import parse_user_agent, generate_fingerprint, get_client_ip
+from modules.risk_engine import calculate_risk
+from modules.alerts import generate_alerts
+from modules.ip_intel import get_ip_intelligence
 
 app = Flask(__name__)
+app.config["SECRET_KEY"] = "change-this-secret-key"
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///threatpulse.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-LOG_FILE = "logs.txt"
+db = SQLAlchemy(app)
 
-# ------------------ HTML DASHBOARD ------------------
 
-HTML = """
-<h2>🚀 Visitor Intelligence Dashboard</h2>
+class LoginEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
 
-<div id="map" style="height: 400px;"></div>
+    username = db.Column(db.String(120))
+    ip_address = db.Column(db.String(100))
+    user_agent = db.Column(db.Text)
 
-<table border="1" cellpadding="5">
-<tr>
-<th>Time</th>
-<th>IP</th>
-<th>City</th>
-<th>Country</th>
-<th>ISP</th>
-<th>VPN?</th>
-<th>Device</th>
-</tr>
+    browser = db.Column(db.String(100))
+    os = db.Column(db.String(100))
+    device = db.Column(db.String(100))
+    fingerprint = db.Column(db.String(128))
 
-{% for row in data %}
-<tr>
-<td>{{row[0]}}</td>
-<td>{{row[1]}}</td>
-<td>{{row[2]}}</td>
-<td>{{row[3]}}</td>
-<td>{{row[4]}}</td>
+    city = db.Column(db.String(120), default="Unknown")
+    country = db.Column(db.String(120), default="Unknown")
+    isp = db.Column(db.String(200), default="Unknown")
+    latitude = db.Column(db.Float, default=0.0)
+    longitude = db.Column(db.Float, default=0.0)
+    is_proxy = db.Column(db.Boolean, default=False)
+    is_vpn = db.Column(db.Boolean, default=False)
 
-{% if row[7] == "True" %}
-<td style="color:red;">Yes</td>
-{% else %}
-<td style="color:green;">No</td>
-{% endif %}
+    status = db.Column(db.String(20))
+    risk_score = db.Column(db.Integer)
+    risk_level = db.Column(db.String(20))
 
-<td>{{row[8]}}</td>
-</tr>
-{% endfor %}
-</table>
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-<script>
-var map = L.map('map').setView([20, 78], 5);
+class Alert(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    alert_type = db.Column(db.String(120))
+    message = db.Column(db.Text)
+    severity = db.Column(db.String(20))
+    ip_address = db.Column(db.String(100))
+    username = db.Column(db.String(120))
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-{% for row in data %}
-L.marker([{{row[5]}}, {{row[6]}}])
-.addTo(map)
-.bindPopup("IP: {{row[1]}}<br>{{row[2]}}, {{row[3]}}");
-{% endfor %}
-</script>
-"""
+DEMO_USER = {
+    "username": "admin",
+    "password": "Admin@123"
+}
 
-# ------------------ GET LOCATION ------------------
 
-def get_location(ip):
-    try:
-        res = requests.get(f"http://ip-api.com/json/{ip}").json()
-        return (
-            res.get("city"),
-            res.get("country"),
-            res.get("isp"),
-            res.get("lat"),
-            res.get("lon"),
-            res.get("proxy")
+@app.route("/")
+def index():
+    return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+
+        ip_address = get_client_ip(request)
+        user_agent = request.headers.get("User-Agent", "Unknown")
+
+        parsed = parse_user_agent(user_agent)
+        fingerprint = generate_fingerprint(ip_address, user_agent)
+
+        ip_intel = get_ip_intelligence(ip_address)
+
+        status = "success" if username == DEMO_USER["username"] and password == DEMO_USER["password"] else "failed"
+
+        risk_score, risk_level = calculate_risk(
+            username=username,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status=status,
+            ip_intel=ip_intel
         )
-    except:
-        return "N/A", "N/A", "N/A", 0, 0, False
 
-# ------------------ TRACK VISITOR ------------------
+        event = LoginEvent(
+            username=username,
+            ip_address=ip_address,
+            user_agent=user_agent,
 
-@app.route('/')
-def track():
-    # Get real IP behind proxy/tunnel
-    ip = request.headers.get('CF-Connecting-IP') or \
-         request.headers.get('X-Forwarded-For') or \
-         request.remote_addr
+            browser=parsed["browser"],
+            os=parsed["os"],
+            device=parsed["device"],
+            fingerprint=fingerprint,
 
-    device = request.headers.get('User-Agent')
+            city=ip_intel["city"],
+            country=ip_intel["country"],
+            isp=ip_intel["isp"],
+            latitude=ip_intel["latitude"],
+            longitude=ip_intel["longitude"],
+            is_proxy=ip_intel["is_proxy"],
+            is_vpn=ip_intel["is_vpn"],
 
-    city, country, isp, lat, lon, proxy = get_location(ip)
+            status=status,
+            risk_score=risk_score,
+            risk_level=risk_level
+        )
 
-    time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.session.add(event)
+        db.session.commit()
 
-    log = f"{time},{ip},{city},{country},{isp},{lat},{lon},{proxy},{device}\n"
+        new_alerts = generate_alerts(
+            db=db,
+            AlertModel=Alert,
+            EventModel=LoginEvent,
+            current_event=event
+        )
 
-    with open(LOG_FILE, "a") as f:
-        f.write(log)
+        for alert in new_alerts:
+            db.session.add(alert)
 
-    print(log)
+        db.session.commit()
 
-    return "Logged 👀"
+        if status == "success":
+            session["logged_in"] = True
+            session["username"] = username
+            return redirect(url_for("dashboard"))
 
-# ------------------ DASHBOARD ------------------
+        error = "Invalid username or password"
 
-@app.route('/dashboard')
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/dashboard")
 def dashboard():
-    data = []
-    try:
-        with open(LOG_FILE, "r") as f:
-            for line in f.readlines():
-                data.append(line.strip().split(","))
-    except:
-        pass
+    total_events = LoginEvent.query.count()
+    success_count = LoginEvent.query.filter_by(status="success").count()
+    failed_count = LoginEvent.query.filter_by(status="failed").count()
+    alert_count = Alert.query.count()
+    high_risk_count = LoginEvent.query.filter(LoginEvent.risk_score >= 70).count()
 
-    return render_template_string(HTML, data=data)
+    recent_events = LoginEvent.query.order_by(LoginEvent.timestamp.desc()).limit(10).all()
+    recent_alerts = Alert.query.order_by(Alert.timestamp.desc()).limit(10).all()
 
-# ------------------ RUN APP ------------------
+    map_events = LoginEvent.query.filter(
+        LoginEvent.latitude != 0.0,
+        LoginEvent.longitude != 0.0
+    ).order_by(LoginEvent.timestamp.desc()).limit(25).all()
 
-app.run(host='0.0.0.0', port=5000)
+    return render_template(
+        "dashboard.html",
+        total_events=total_events,
+        success_count=success_count,
+        failed_count=failed_count,
+        alert_count=alert_count,
+        high_risk_count=high_risk_count,
+        recent_events=recent_events,
+        recent_alerts=recent_alerts,
+        map_events=map_events
+    )
+
+
+@app.route("/events")
+def events():
+    all_events = LoginEvent.query.order_by(LoginEvent.timestamp.desc()).all()
+    return render_template("events.html", events=all_events)
+
+
+@app.route("/alerts")
+def alerts():
+    all_alerts = Alert.query.order_by(Alert.timestamp.desc()).all()
+    return render_template("alerts.html", alerts=all_alerts)
+
+
+@app.route("/export/events.csv")
+def export_events():
+    events = LoginEvent.query.order_by(LoginEvent.timestamp.desc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "ID",
+        "Username",
+        "IP Address",
+        "City",
+        "Country",
+        "ISP",
+        "Latitude",
+        "Longitude",
+        "Proxy",
+        "VPN",
+        "Browser",
+        "OS",
+        "Device",
+        "Fingerprint",
+        "Status",
+        "Risk Score",
+        "Risk Level",
+        "Timestamp"
+    ])
+
+    for event in events:
+        writer.writerow([
+            event.id,
+            event.username,
+            event.ip_address,
+            event.city,
+            event.country,
+            event.isp,
+            event.latitude,
+            event.longitude,
+            event.is_proxy,
+            event.is_vpn,
+            event.browser,
+            event.os,
+            event.device,
+            event.fingerprint,
+            event.status,
+            event.risk_score,
+            event.risk_level,
+            event.timestamp
+        ])
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=login_events.csv"}
+    )
+
+
+@app.route("/reset")
+def reset():
+    db.drop_all()
+    db.create_all()
+    return redirect(url_for("login"))
+
+
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+
+    app.run(host="0.0.0.0", port=5000, debug=True)

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>Security Alerts</h1>
+
+<div class="card">
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Severity</th>
+            <th>IP</th>
+            <th>Username</th>
+            <th>Message</th>
+        </tr>
+
+        {% for alert in alerts %}
+        <tr>
+            <td>{{ alert.id }}</td>
+            <td>{{ alert.timestamp }}</td>
+            <td>{{ alert.alert_type }}</td>
+            <td>{{ alert.severity }}</td>
+            <td>{{ alert.ip_address }}</td>
+            <td>{{ alert.username }}</td>
+            <td>{{ alert.message }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+{% endblock %}
